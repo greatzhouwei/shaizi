@@ -1,0 +1,24 @@
+# 开发工具配置
+.DS_Store
+node_modules/
+miniprogram_npm/
+.idea/
+.vscode/
+
+# 项目配置
+project.private.config.json
+
+# 编译输出
+dist/
+
+# 日志文件
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+
+# 本地环境文件
+.env.local
+.env.*.local
+
+# 云开发目录
+cloudfunctions/*/node_modules 
