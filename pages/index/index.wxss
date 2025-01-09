@@ -10,61 +10,79 @@ page {
 }
 
 .container {
-  padding: 20px;
+  padding: 8px 10px;
 }
 
 .player-section {
-  margin: 20px 0;
+  margin: 0;
+  text-align: center;
 }
 
 .dice-container {
   display: flex;
-  flex-wrap: wrap;
-  gap: 10px;
-  margin-top: 10px;
+  flex-wrap: nowrap;
+  gap: 5px;
+  margin-top: 5px;
+  justify-content: center;
 }
 
 .dice {
-  width: 60px;
-  height: 60px;
+  width: 35px;
+  height: 35px;
   background: #ffffff;
-  border-radius: 8px;
+  border-radius: 6px;
   box-shadow: 0 2px 4px rgba(0,0,0,0.1);
 }
 
+.dice.rolling {
+  animation: roll 0.5s linear infinite;
+}
+
 .controls {
-  margin-top: 30px;
+  margin-top: 15px;
 }
 
 .game-controls {
-  margin-top: 20px;
+  margin-top: 10px;
 }
 
 .call-picker {
-  height: 200px;
-  margin: 20px 0;
+  height: 120px;
+  margin: 8px 0;
 }
 
 .result {
-  margin-top: 30px;
+  margin-top: 15px;
   display: flex;
   flex-direction: column;
   align-items: center;
-  gap: 10px;
+  gap: 5px;
 }
 
 .restart-btn {
-  margin-top: 20px;
+  margin-top: 10px;
   background-color: #07c160;
   color: white;
   width: 200px;
+  height: 40px;
+  line-height: 40px;
 }
 
 .status-text {
   text-align: center;
-  padding: 10px;
+  padding: 0 5px;
   color: #666;
   font-size: 14px;
+  white-space: nowrap;
+  background: #f8f8f8;
+  border-radius: 3px;
+  height: 100%;
+  line-height: 18px;
+}
+
+.status-text-wrapper {
+  text-align: center;
+  width: 100%;
 }
 
 button[disabled] {
@@ -78,22 +96,26 @@ button[disabled] {
 }
 
 .call-history {
-  margin: 20px;
-  padding: 10px;
+  margin: 0;
+  padding: 8px;
   background: #f5f5f5;
   border-radius: 8px;
+  height: calc(100% - 10px);
+  overflow-y: auto;
+  margin-bottom: 0;
 }
 
 .history-title {
   font-weight: bold;
-  margin-bottom: 10px;
+  margin-bottom: 5px;
   text-align: center;
+  font-size: 14px;
 }
 
 .history-container {
   display: flex;
   justify-content: space-between;
-  gap: 20px;
+  gap: 5px;
 }
 
 .history-column {
@@ -105,15 +127,17 @@ button[disabled] {
   font-weight: bold;
   display: block;
   text-align: center;
-  padding: 5px 0;
+  padding: 3px 0;
   border-bottom: 2px solid #ddd;
-  margin-bottom: 10px;
+  margin-bottom: 5px;
+  font-size: 13px;
 }
 
 .history-item {
-  padding: 5px 0;
+  padding: 3px 0;
   text-align: center;
   border-bottom: 1px solid #eee;
+  font-size: 12px;
 }
 
 .history-item:last-child {
@@ -123,17 +147,17 @@ button[disabled] {
 /* 添加游戏主区域样式 */
 .game-main {
   display: flex;
-  gap: 20px;
-  margin-top: 20px;
+  gap: 0;
+  margin-top: 0;
 }
 
 .game-left {
-  flex: 1;
+  flex: 2;
   min-width: 0;
 }
 
 .game-right {
-  flex: 1;
+  flex: 3;
   min-width: 0;
 }
 
@@ -142,7 +166,9 @@ button[disabled] {
   background: #f5f5f5;
   border-radius: 8px;
   padding: 10px;
-  height: 100%;
+  height: 300px;
+  overflow-y: auto;
+  margin-bottom: 0;
 }
 
 .history-title {
@@ -198,4 +224,96 @@ button[disabled] {
 /* 调整按钮样式 */
 button {
   margin: 5px 0;
+}
+
+/* 调整所有骰子显示区域的样式 */
+.all-dice {
+  margin: 10px 0;
+}
+
+/* 添加胜利次数统计栏样式 */
+.win-stats {
+  display: flex;
+  justify-content: space-around;
+  padding: 8px;
+  background: #f8f8f8;
+  border-radius: 8px;
+  margin-bottom: 5px;
+  box-shadow: 0 2px 4px rgba(0,0,0,0.05);
+}
+
+.win-item {
+  text-align: center;
+}
+
+.win-count {
+  font-weight: bold;
+  color: #07c160;
+  margin-left: 5px;
+}
+
+/* 修改按钮组样式 */
+.button-group {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 5px;
+  justify-content: space-between;
+  margin-top: 5px;
+}
+
+.button-group button {
+  flex: 1;
+  min-width: 0;
+  font-size: 13px;
+  padding: 0 3px;
+  height: 35px;
+  line-height: 35px;
+}
+
+/* 开牌按钮样式 */
+.button-group button:last-child {
+  flex: 100%;
+  margin-top: 3px;
+  height: 40px;
+  line-height: 40px;
+  background-color: #e64340;
+  color: white;
+}
+
+/* 禁用状态下的开牌按钮样式 */
+.button-group button:last-child[disabled] {
+  background-color: rgba(230, 67, 64, 0.5) !important;
+  color: rgba(255, 255, 255, 0.7) !important;
+}
+
+/* 调整叫数和加一按钮样式 */
+.button-group button:not(:last-child) {
+  flex: 1;
+}
+
+@keyframes roll {
+  0% {
+    transform: rotate(0deg) scale(1);
+  }
+  25% {
+    transform: rotate(90deg) scale(0.8);
+  }
+  50% {
+    transform: rotate(180deg) scale(1);
+  }
+  75% {
+    transform: rotate(270deg) scale(0.8);
+  }
+  100% {
+    transform: rotate(360deg) scale(1);
+  }
+}
+
+/* 修改状态提示区域的样式 */
+.status-text-container {
+  width: fit-content;
+  margin: 0 auto;
+  height: 18px;
+  line-height: 18px;
+  margin-bottom: 0;
 }

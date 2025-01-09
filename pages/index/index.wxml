@@ -2,24 +2,64 @@
 <navigation-bar title="Weixin" back="{{false}}" color="black" background="#FFF"></navigation-bar>
 <scroll-view class="scrollarea" scroll-y type="list">
   <view class="container">
-    <!-- 添加状态提示 -->
-    <view class="status-text" wx:if="{{waitingText}}">{{waitingText}}</view>
-    <view class="status-text" wx:if="{{currentTurn}}">{{currentTurn}}</view>
-
-    <!-- 游戏进行时只显示自己的骰子 -->
-    <view wx:if="{{!showResult}}" class="player-section">
-      <text>我的骰子:</text>
-      <view class="dice-container">
-        <block wx:for="{{myDice}}" wx:key="index">
-          <image class="dice" src="{{diceImages[item-1]}}" mode="aspectFit"></image>
-        </block>
+    <!-- 添加胜利次数统计栏 -->
+    <view class="win-stats">
+      <view class="win-item">
+        <text>玩家一胜利：</text>
+        <text class="win-count">{{player1Wins || 0}}</text>
+      </view>
+      <view class="win-item">
+        <text>玩家二胜利：</text>
+        <text class="win-count">{{player2Wins || 0}}</text>
       </view>
     </view>
 
-    <!-- 游戏主区域：控制区和历史记录并排 -->
+    <!-- 添加状态提示 -->
+    <view class="status-text-container">
+      <view class="status-text" wx:if="{{waitingText}}">{{waitingText}}</view>
+      <view class="status-text" wx:if="{{currentTurn}}">{{currentTurn}}</view>
+    </view>
+
+    <!-- 游戏主区域：历史记录和控制区并排 -->
     <view class="game-main">
-      <!-- 左侧控制区 -->
+      <!-- 左侧历史记录 -->
       <view class="game-left">
+        <view class="call-history">
+          <text class="history-title">叫数记录</text>
+          <view class="history-container">
+            <view class="history-column">
+              <text class="player-title">玩家一</text>
+              <view wx:for="{{callHistory}}" wx:key="index" class="history-item" wx:if="{{item.player === 1}}">
+                {{item.text}}
+              </view>
+            </view>
+            <view class="history-column">
+              <text class="player-title">玩家二</text>
+              <view wx:for="{{callHistory}}" wx:key="index" class="history-item" wx:if="{{item.player === 2}}">
+                {{item.text}}
+              </view>
+            </view>
+          </view>
+        </view>
+      </view>
+
+      <!-- 右侧控制区 -->
+      <view class="game-right">
+        <!-- 游戏进行时只显示自己的骰子 -->
+        <view wx:if="{{!showResult}}" class="player-section">
+          <text>我的骰子:</text>
+          <view class="dice-container">
+            <block wx:for="{{myDice}}" wx:key="index">
+              <image 
+                class="dice {{isRolling ? 'rolling' : ''}}" 
+                src="{{diceImages[isRolling ? (index % 6) : (item-1)]}}" 
+                mode="aspectFit"
+                style="animation-delay: {{index * 50}}ms">
+              </image>
+            </block>
+          </view>
+        </view>
+
         <!-- 质疑后显示所有骰子 -->
         <view wx:if="{{showResult}}" class="all-dice">
           <view class="player-section">
@@ -43,7 +83,7 @@
 
         <view class="controls">
           <button 
-            disabled="{{gameStatus !== 'ready' || currentPlayer !== (isPlayer1 ? 1 : 2)}}" 
+            disabled="{{currentPlayer !== (isPlayer1 ? 1 : 2) || (isPlayer1 ? player1Dice.length > 0 : player2Dice.length > 0)}}" 
             bindtap="rollDice">
             投掷骰子
           </button>
@@ -62,43 +102,33 @@
               </picker-view-column>
             </picker-view>
             
-            <button 
-              bindtap="makeCall" 
-              disabled="{{currentPlayer !== (isPlayer1 ? 1 : 2)}}">叫数</button>
-            <button 
-              bindtap="challenge" 
-              disabled="{{!lastCall.count}}">质疑</button>
-          </view>
-        </view>
-      </view>
-
-      <!-- 右侧历史记录 -->
-      <view class="game-right">
-        <view class="call-history">
-          <text class="history-title">叫数记录</text>
-          <view class="history-container">
-            <view class="history-column">
-              <text class="player-title">玩家一</text>
-              <view wx:for="{{callHistory}}" wx:key="index" class="history-item" wx:if="{{item.player === 1}}">
-                {{item.text}}
-              </view>
-            </view>
-            <view class="history-column">
-              <text class="player-title">玩家二</text>
-              <view wx:for="{{callHistory}}" wx:key="index" class="history-item" wx:if="{{item.player === 2}}">
-                {{item.text}}
-              </view>
+            <view class="button-group">
+              <button 
+                bindtap="addOne" 
+                disabled="{{currentPlayer !== (isPlayer1 ? 1 : 2)}}">
+                加一
+              </button>
+              <button 
+                bindtap="makeCall" 
+                disabled="{{currentPlayer !== (isPlayer1 ? 1 : 2)}}">
+                叫数
+              </button>
+              <button 
+                bindtap="challenge" 
+                disabled="{{currentPlayer !== (isPlayer1 ? 1 : 2)}}">
+                开牌
+              </button>
             </view>
           </view>
         </view>
-      </view>
-    </view>
 
-    <!-- 游戏结果显示 -->
-    <view wx:if="{{showResult}}" class="result">
-      <text>最后叫数：{{numberWords[lastCall.count-1]}}个{{lastCall.value}}点</text>
-      <text>实际数量：{{actualCount}}个</text>
-      <button class="restart-btn" bindtap="restart">重新开始</button>
+        <!-- 游戏结果显示 -->
+        <view wx:if="{{showResult}}" class="result">
+          <text>最后叫数：{{numberWords[lastCall.count-1]}}个{{lastCall.value}}点</text>
+          <text>实际数量：{{actualCount}}个</text>
+          <button class="restart-btn" bindtap="restart">重新开始</button>
+        </view>
+      </view>
     </view>
   </view>
 </scroll-view>

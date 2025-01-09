@@ -39,10 +39,19 @@ Page({
     reconnectCount: 0,
     maxReconnectCount: 5,
     callHistory: [],  // 添加历史记录数组
+    player1Wins: 0,  // 玩家一胜利次数
+    player2Wins: 0,  // 玩家二胜利次数
+    isButtonLocked: false,  // 添加按钮锁定状态
+    isRolling: false,
+    audioContext: null
   },
 
   onLoad() {
     this.initGame()
+    this.setData({
+      audioContext: wx.createInnerAudioContext()
+    })
+    this.data.audioContext.src = '/assets/sound/dice_shake-96201.mp3'
   },
 
   // 添加页面卸载时的清理
@@ -70,6 +79,12 @@ Page({
   // 初始化游戏
   async initGame() {
     try {
+      // 重置状态
+      this.setData({
+        reconnectCount: 0,
+        waitingText: '正在初始化游戏...'
+      })
+
       // 修改云函数调用方式
       const { result } = await wx.cloud.callFunction({
         name: 'getOpenId',
@@ -113,7 +128,9 @@ Page({
           lastCall: { count: 0, value: 0 },
           gameStatus: 'ready',
           createTime: db.serverDate(),
-          callHistory: []  // 初始化空的历史记录数组
+          callHistory: [],  // 初始化空的历史记录数组
+          player1Wins: 0,   // 初始化玩家一胜利次数
+          player2Wins: 0    // 初始化玩家二胜利次数
         }
         const res = await db.collection('games').add({
           data: gameData
@@ -158,10 +175,18 @@ Page({
       this.watchGameChanges()
     } catch (error) {
       console.error('初始化游戏失败：', error)
-      wx.showToast({
-        title: '初始化失败，请重试',
-        icon: 'none',
-        duration: 2000
+      wx.showModal({
+        title: '初始化失败',
+        content: '是否重试？',
+        success: (res) => {
+          if (res.confirm) {
+            this.initGame()
+          } else {
+            wx.navigateBack({
+              delta: 1
+            })
+          }
+        }
       })
     }
   },
@@ -192,21 +217,24 @@ Page({
         }
       }
 
+      // 确保 gameId 存在
+      if (!this.data.gameId) {
+        console.error('游戏ID不存在')
+        this.initGame() // 重新初始化游戏
+        return
+      }
+
       const watcher = db.collection('games')
         .doc(this.data.gameId)
         .watch({
           onChange: (snapshot) => {
             try {
-              // 重置重连计数
-              this.setData({ reconnectCount: 0 })
-
               if (!snapshot || !snapshot.docs || !snapshot.docs[0]) {
-                console.error('无效的快照数据:', snapshot)
-                return
+                console.error('无效的快照数据:', snapshot);
+                return;
               }
               
-              const data = snapshot.docs[0]
-              const oldLastCall = this.data.lastCall
+              const data = snapshot.docs[0];
               
               // 更新游戏状态
               this.setData({
@@ -218,46 +246,38 @@ Page({
                 myDice: this.data.isPlayer1 ? (data.player1Dice || []) : (data.player2Dice || []),
                 waitingText: data.status === 'waiting' ? '等待其他玩家加入...' : '',
                 currentTurn: this.getCurrentTurnText(data),
-                callHistory: data.callHistory || []  // 更新历史记录
-              })
+                callHistory: data.callHistory || [],
+                winner: data.winner || null,
+                player1Wins: data.player1Wins || 0,  // 从数据库更新玩家一胜利次数
+                player2Wins: data.player2Wins || 0,  // 从数据库更新玩家二胜利次数
+                player1Dice: data.player1Dice || [],
+                player2Dice: data.player2Dice || []
+              });
 
-              // 如果lastCall发生变化，添加到历史记录
-              if (data.lastCall && 
-                  (data.lastCall.count !== oldLastCall.count || 
-                   data.lastCall.value !== oldLastCall.value)) {
-                const playerText = data.currentPlayer === 1 ? '玩家二' : '玩家一'
-                wx.showToast({
-                  title: `${playerText}：${this.data.numberWords[data.lastCall.count-1]}个${data.lastCall.value}点`,
-                  icon: 'none',
-                  duration: 2000
-                })
-              }
-
-              // 在游戏结束时显示所有骰子
-              if (data.showResult) {
-                this.setData({
-                  player1Dice: data.player1Dice || [],
-                  player2Dice: data.player2Dice || []
-                })
+              // 如果游戏结束且有胜利方，显示提示
+              if (data.gameStatus === 'ended' && data.winner) {
+                wx.showModal({
+                  title: '游戏结束',
+                  content: `胜利方为玩家${data.winner}\n\n玩家一的骰子: ${data.player1Dice.join(', ')}\n玩家二的骰子: ${data.player2Dice.join(', ')}`,
+                  showCancel: false
+                });
               }
             } catch (error) {
-              this.handleError(error, '监听数据处理')
+              console.error('数据处理错误:', error);
+              this.handleError(error, '监听数据处理');
             }
           },
           onError: (err) => {
+            console.error('监听错误:', err)
             this.handleError(err, '监听游戏')
-            // 尝试重连
             this.tryReconnect()
           }
         })
 
-      // 保存监听器引用
-      this.setData({
-        watcher: watcher
-      })
+      this.setData({ watcher })
     } catch (error) {
+      console.error('设置监听器错误:', error)
       this.handleError(error, '设置监听器')
-      // 尝试重连
       this.tryReconnect()
     }
   },
@@ -283,33 +303,74 @@ Page({
       wx.showToast({
         title: '还没轮到你',
         icon: 'none'
-      })
-      return
+      });
+      return;
     }
 
+    // 播放音效
+    this.data.audioContext.play();
+
+    // 开始动画
+    this.setData({ isRolling: true });
+
+    // 生成最终的骰子结果
     let diceResults = [];
     for (let i = 0; i < 5; i++) {
       diceResults.push(Math.floor(Math.random() * 6) + 1);
     }
     diceResults.sort((a, b) => a - b);
 
-    const updateData = {}
-    if (this.data.isPlayer1) {
-      updateData.player1Dice = diceResults
-      updateData.currentPlayer = 2
-    } else {
-      updateData.player2Dice = diceResults
-      updateData.currentPlayer = 1
-      updateData.gameStatus = 'playing'
-    }
+    // 创建动画效果
+    let count = 0;
+    const animationInterval = setInterval(() => {
+      const tempDice = [];
+      for (let i = 0; i < 5; i++) {
+        tempDice.push(Math.floor(Math.random() * 6) + 1);
+      }
+      this.setData({
+        myDice: tempDice
+      });
+      count++;
+      if (count > 10) { // 动画持续约500ms
+        clearInterval(animationInterval);
+        // 停止动画并显示最终结果
+        setTimeout(() => {
+          this.setData({ 
+            isRolling: false,
+            myDice: diceResults
+          });
 
-    try {
-      await db.collection('games').doc(this.data.gameId).update({
-        data: updateData
-      })
-    } catch (error) {
-      console.error('投掷骰子失败：', error)
-    }
+          // 更新数据库
+          const updateData = {};
+          if (this.data.isPlayer1) {
+            updateData.player1Dice = diceResults;
+            updateData.currentPlayer = 2;
+            updateData.gameStatus = 'ready';
+          } else {
+            updateData.player2Dice = diceResults;
+            updateData.currentPlayer = 1;
+            updateData.gameStatus = 'ready';
+          }
+
+          db.collection('games').doc(this.data.gameId).update({
+            data: updateData
+          }).then(() => {
+            // 如果双方都已投掷骰子，则更新游戏状态为playing
+            return db.collection('games').doc(this.data.gameId).get();
+          }).then(game => {
+            if (game.data.player1Dice.length > 0 && game.data.player2Dice.length > 0) {
+              return db.collection('games').doc(this.data.gameId).update({
+                data: {
+                  gameStatus: 'playing'
+                }
+              });
+            }
+          }).catch(error => {
+            console.error('投掷骰子失败：', error);
+          });
+        }, 500);
+      }
+    }, 50);
   },
 
   // 添加 picker 的值变化处理方法
@@ -323,33 +384,69 @@ Page({
 
   // 修改叫数方法
   async makeCall() {
+    // 如果按钮已锁定，直接返回
+    if (this.data.isButtonLocked) {
+      return;
+    }
+
     if (this.data.currentPlayer !== (this.data.isPlayer1 ? 1 : 2)) {
       wx.showToast({
         title: '还没轮到你',
         icon: 'none'
-      })
-      return
+      });
+      return;
     }
 
-    const { selectedCount, selectedValue } = this.data
+    const { selectedCount, selectedValue } = this.data;
     
     // 检查是否已选择数值
     if (!selectedCount || !selectedValue) {
       wx.showToast({
         title: '请选择数量和点数',
         icon: 'none'
-      })
-      return
+      });
+      return;
+    }
+
+    // 第一次叫数的验证提示
+    if (this.data.lastCall.count === 0) {
+      if (selectedValue === 1 && selectedCount < 2) {
+        wx.showToast({
+          title: '叫1时至少需要叫2个',
+          icon: 'none',
+          duration: 2000
+        })
+        return
+      }
+      if (selectedValue !== 1 && selectedCount < 3) {
+        wx.showToast({
+          title: '非1点数至少需要叫3个',
+          icon: 'none',
+          duration: 2000
+        })
+        return
+      }
     }
 
     if (!this.validateCall(selectedCount, selectedValue)) {
-      wx.showToast({
-        title: '叫数无效！数量不能减少，数量相同时点数必须增加',
-        icon: 'none',
-        duration: 2000
-      })
+      if (this.data.lastCall.value === 1) {
+        wx.showToast({
+          title: '上次叫的是1，只能增加数量',
+          icon: 'none',
+          duration: 2000
+        })
+      } else {
+        wx.showToast({
+          title: '叫数无效！需要增加数量或叫更大的点数',
+          icon: 'none',
+          duration: 2000
+        })
+      }
       return
     }
+
+    // 锁定按钮
+    this.setData({ isButtonLocked: true });
 
     try {
       // 先获取当前游戏数据
@@ -385,49 +482,244 @@ Page({
         title: '叫数失败，请重试',
         icon: 'none'
       })
+    } finally {
+      // 延迟解锁按钮，防止快速连击
+      setTimeout(() => {
+        this.setData({ isButtonLocked: false });
+      }, 1000); // 1秒后解锁
     }
   },
 
-  // 添加验证叫数的方法
+  // 修改验证叫数的方法
   validateCall(count, value) {
-    const lastCall = this.data.lastCall
-    if (lastCall.count === 0) return true // 第一次叫数
+    const lastCall = this.data.lastCall;
+    
+    // 第一次叫数的特殊规则
+    if (lastCall.count === 0) {
+      // 如果是1点，可以两个起叫，否则必须三个起叫
+      if (value === 1) {
+        return count >= 2;
+      } else {
+        return count >= 3;
+      }
+    }
 
-    // 数量必须增加，或者数量相同时点数必须增加
-    return count > lastCall.count || (count === lastCall.count && value > lastCall.value)
+    // 处理后续叫数的规则
+    if (lastCall.value === 1) {
+      // 上一次叫的是1，新叫的数必须数量更多
+      return count > lastCall.count;
+    }
+
+    if (value === 1) {
+      // 当前叫1，数量可以和上次相同（因为1最大）
+      return count >= lastCall.count;
+    }
+
+    // 检查是否有人叫过1
+    const hasCalledOne = this.data.callHistory.some(call => 
+      call.text.includes('1点')
+    );
+
+    // 如果已经叫过1，则1不能再当任何数使用
+    if (hasCalledOne) {
+      // 计算实际数量时不计入1点
+      return count > lastCall.count || 
+             (count === lastCall.count && value > lastCall.value);
+    }
+
+    // 其他情况：
+    // 1. 数量必须增加，或者
+    // 2. 数量相同时，新的点数必须大于旧的点数（除非旧的是1）
+    return count > lastCall.count || 
+           (count === lastCall.count && value > lastCall.value && lastCall.value !== 1);
   },
 
   // 修改质疑方法
   async challenge() {
-    try {
-      const game = await db.collection('games').doc(this.data.gameId).get()
-      const allDice = [...game.data.player1Dice, ...game.data.player2Dice]
-      const {count, value} = game.data.lastCall
-      
-      let actualCount = allDice.filter(dice => 
-        dice === value || dice === 1
-      ).length
+    // 如果按钮已锁定，直接返回
+    if (this.data.isButtonLocked) {
+      return;
+    }
 
+    // 锁定按钮
+    this.setData({ isButtonLocked: true });
+
+    try {
+      const game = await db.collection('games').doc(this.data.gameId).get();
+      const player1Dice = game.data.player1Dice;
+      const player2Dice = game.data.player2Dice;
+      const { count, value } = game.data.lastCall;
+
+      // 检查是否有人叫过1
+      const hasCalledOne = game.data.callHistory.some(call => 
+        call.text.includes('1点')
+      );
+
+      // 分别计算两个玩家的点数统计
+      const player1Count = {};
+      const player2Count = {};
+      
+      player1Dice.forEach(dice => {
+        player1Count[dice] = (player1Count[dice] || 0) + 1;
+      });
+      
+      player2Dice.forEach(dice => {
+        player2Count[dice] = (player2Count[dice] || 0) + 1;
+      });
+
+      // 计算实际数量
+      let actualCount = 0;
+
+      // 检查玩家一的骰子
+      const checkPlayer1Dice = () => {
+        // 检查是否所有点数都只出现一次
+        let allSingle = true;
+        let hasDuplicate = false;
+        for (let dice in player1Count) {
+          if (player1Count[dice] > 1) {
+            allSingle = false;
+            hasDuplicate = true;
+            break;
+          }
+        }
+
+        // 如果所有点数都只出现一次，返回0
+        if (allSingle) {
+          return 0;
+        }
+
+        // 检查是否所有点数都相同
+        const nonOneCount = Object.entries(player1Count).find(([dice, count]) => 
+          dice !== '1' && count > 0
+        );
+
+        if (nonOneCount) {
+          const [targetValue, targetCount] = nonOneCount;
+          const onesCount = player1Count[1] || 0;
+          
+          // 如果所有骰子都是这个数字（包括1可以当任何数）
+          if (targetCount + onesCount === 5) {
+            return onesCount > 0 ? 6 : 7; // 有1用6，没1用7
+          }
+        }
+
+        // 如果不是所有点数都相同，按正常规则计算
+        if (!hasCalledOne) {
+          return (player1Count[value] || 0) + (player1Count[1] || 0);
+        } else {
+          return player1Count[value] || 0;
+        }
+      };
+
+      // 检查玩家二的骰子
+      const checkPlayer2Dice = () => {
+        // 检查是否所有点数都只出现一次
+        let allSingle = true;
+        let hasDuplicate = false;
+        for (let dice in player2Count) {
+          if (player2Count[dice] > 1) {
+            allSingle = false;
+            hasDuplicate = true;
+            break;
+          }
+        }
+
+        // 如果所有点数都只出现一次，返回0
+        if (allSingle) {
+          return 0;
+        }
+
+        // 检查是否所有点数都相同
+        const nonOneCount = Object.entries(player2Count).find(([dice, count]) => 
+          dice !== '1' && count > 0
+        );
+
+        if (nonOneCount) {
+          const [targetValue, targetCount] = nonOneCount;
+          const onesCount = player2Count[1] || 0;
+          
+          // 如果所有骰子都是这个数字（包括1可以当任何数）
+          if (targetCount + onesCount === 5) {
+            return onesCount > 0 ? 6 : 7; // 有1用6，没1用7
+          }
+        }
+
+        // 如果不是所有点数都相同，按正常规则计算
+        if (!hasCalledOne) {
+          return (player2Count[value] || 0) + (player2Count[1] || 0);
+        } else {
+          return player2Count[value] || 0;
+        }
+      };
+
+      // 计算最终的实际数量
+      actualCount = checkPlayer1Dice() + checkPlayer2Dice();
+
+      // 判断胜负
+      let winner;
+      if (actualCount >= count) {
+        winner = this.data.currentPlayer === 1 ? 2 : 1;
+      } else {
+        winner = this.data.currentPlayer;
+      }
+
+      // 更新游戏状态和胜利次数
       await db.collection('games').doc(this.data.gameId).update({
         data: {
           gameStatus: 'ended',
           showResult: true,
-          actualCount: actualCount
+          actualCount: actualCount,
+          winner: winner,
+          player1Wins: winner === 1 ? db.command.inc(1) : db.command.inc(0),
+          player2Wins: winner === 2 ? db.command.inc(1) : db.command.inc(0)
         }
-      })
+      });
+
+      // 立即从数据库获取最新的胜利次数
+      const updatedGame = await db.collection('games').doc(this.data.gameId).get();
+
+      // 更新本地状态
+      this.setData({
+        showResult: true,
+        winner: winner,
+        player1Wins: updatedGame.data.player1Wins,
+        player2Wins: updatedGame.data.player2Wins,
+        player1Dice: updatedGame.data.player1Dice,
+        player2Dice: updatedGame.data.player2Dice
+      });
+
+      // 显示胜利提示和双方骰子
+      wx.showModal({
+        title: '游戏结束',
+        content: `胜利方为玩家${winner}\n\n玩家一的骰子: ${player1Dice.join(', ')}\n玩家二的骰子: ${player2Dice.join(', ')}`,
+        showCancel: false
+      });
+
     } catch (error) {
-      console.error('质疑失败：', error)
+      console.error('质疑失败：', error);
+    } finally {
+      // 延迟解锁按钮，防止快速连击
+      setTimeout(() => {
+        this.setData({ isButtonLocked: false });
+      }, 1000); // 1秒后解锁
     }
   },
 
   // 修改重新开始方法
   async restart() {
     try {
+      // 获取当前游戏数据
+      const game = await db.collection('games').doc(this.data.gameId).get();
+      const lastWinner = game.data.winner;
+      
+      // 确定下一局的先手玩家
+      const nextFirstPlayer = lastWinner === 1 ? 2 : 1;
+
       await db.collection('games').doc(this.data.gameId).update({
         data: {
           player1Dice: [],
           player2Dice: [],
-          currentPlayer: 1,
+          currentPlayer: nextFirstPlayer,  // 设置为上一局的失败者
           lastCall: {
             count: 0,
             value: 0
@@ -437,46 +729,61 @@ Page({
           actualCount: 0,
           callHistory: []  // 清空历史记录
         }
-      })
+      });
 
-      // 本地也清空历史记录
+      // 本地也清空历史记录和状态
       this.setData({
-        callHistory: []
-      })
+        callHistory: [],
+        showResult: false, // 重置显示状态
+        lastCall: {  // 重置最后叫数
+          count: 0,
+          value: 0
+        }
+      });
 
       wx.showToast({
         title: '游戏已重新开始',
         icon: 'success',
         duration: 1500
-      })
+      });
     } catch (error) {
-      console.error('重新开始失败：', error)
+      console.error('重新开始失败：', error);
       wx.showToast({
         title: '重新开始失败',
         icon: 'none'
-      })
+      });
     }
   },
 
   // 添加重连方法
   tryReconnect() {
     if (this.data.reconnectCount >= this.data.maxReconnectCount) {
-      wx.showToast({
-        title: '连接失败，请重新进入游戏',
-        icon: 'none',
-        duration: 2000
+      wx.showModal({
+        title: '连接失败',
+        content: '是否重新进入游戏？',
+        success: (res) => {
+          if (res.confirm) {
+            // 重新初始化游戏
+            this.initGame()
+          } else {
+            wx.navigateBack({
+              delta: 1
+            })
+          }
+        }
       })
       return
     }
 
     this.setData({
-      reconnectCount: this.data.reconnectCount + 1
+      reconnectCount: this.data.reconnectCount + 1,
+      waitingText: `正在重新连接...(${this.data.reconnectCount + 1}/${this.data.maxReconnectCount})`
     })
 
     setTimeout(() => {
       console.log(`第${this.data.reconnectCount}次重试连接...`)
       this.watchGameChanges()
-    }, 1000 * Math.min(this.data.reconnectCount, 5)) // 最多等待5秒
+    }, 1000 * Math.min(this.data.reconnectCount, 5))
   },
 
   // 添加计算按钮是否禁用的方法
@@ -484,5 +791,75 @@ Page({
     const isMyTurn = (this.data.isPlayer1 && this.data.currentPlayer === 1) || 
                      (!this.data.isPlayer1 && this.data.currentPlayer === 2);
     return this.data.gameStatus !== 'ready' || !isMyTurn;
-  }
+  },
+
+  // 添加"加一"方法
+  async addOne() {
+    // 如果按钮已锁定，直接返回
+    if (this.data.isButtonLocked) {
+      return;
+    }
+
+    if (this.data.currentPlayer !== (this.data.isPlayer1 ? 1 : 2)) {
+      wx.showToast({
+        title: '还没轮到你',
+        icon: 'none'
+      });
+      return;
+    }
+
+    const lastCall = this.data.lastCall;
+    if (!lastCall.count) {
+      wx.showToast({
+        title: '还没有人叫数',
+        icon: 'none'
+      });
+      return;
+    }
+
+    // 锁定按钮
+    this.setData({ isButtonLocked: true });
+
+    try {
+      // 先获取当前游戏数据
+      const game = await db.collection('games').doc(this.data.gameId).get();
+      const currentHistory = game.data.callHistory || [];
+      const playerText = this.data.isPlayer1 ? '玩家一' : '玩家二';
+      const newCount = lastCall.count + 1;
+      const callText = `${this.data.numberWords[newCount-1]}个${lastCall.value}点`;
+      
+      // 构建新的历史记录
+      const newHistory = [...currentHistory];
+      if (this.data.isPlayer1) {
+        newHistory.push({ player: 1, text: callText });
+      } else {
+        newHistory.push({ player: 2, text: callText });
+      }
+
+      // 更新数据库
+      await db.collection('games').doc(this.data.gameId).update({
+        data: {
+          lastCall: {
+            count: newCount,
+            value: lastCall.value
+          },
+          currentPlayer: this.data.currentPlayer === 1 ? 2 : 1,
+          gameStatus: 'playing',
+          callHistory: newHistory
+        }
+      });
+
+    } catch (error) {
+      console.error('加一失败：', error);
+      wx.showToast({
+        title: '加一失败，请重试',
+        icon: 'none'
+      });
+    } finally {
+      // 延迟解锁按钮，防止快速连击
+      setTimeout(() => {
+        this.setData({ isButtonLocked: false });
+      }, 1000); // 1秒后解锁
+    }
+  },
 })
